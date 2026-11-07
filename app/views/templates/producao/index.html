@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block titulo %}Consulta de produção{% endblock %}
+{% block titulo_pagina %}Consulta de produção{% endblock %}
+{% block subtitulo_pagina %}Filtre as estimativas do LSPA por produto, indicador, localidade e período{% endblock %}
+
+{% block conteudo %}
+{% for aviso in opcoes.avisos %}
+<div class="alert alert-warning d-flex gap-2"><i class="bi bi-exclamation-triangle"></i><div>{{ aviso }}</div></div>
+{% endfor %}
+
+<form class="card cartao barra-filtros" id="form-producao" autocomplete="off">
+  <div class="card-body">
+    <div class="row g-3 align-items-end">
+      <div class="col-12 col-md-6 col-xl-3">
+        <label class="form-label" for="f-produto">Produto agrícola</label>
+        <select class="form-select" id="f-produto" name="produto">
+          <option value="">Todos os produtos</option>
+          {% for p in opcoes.produtos %}
+          <option value="{{ p.codigo }}" {% if p.codigo == selecionado.produto %}selected{% endif %}>
+            {{ "    " * (p.nivel - 1 if p.nivel > 0 else 0) }}{{ p.nome }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-6 col-xl">
+        <label class="form-label" for="f-indicador">Indicador</label>
+        <select class="form-select" id="f-indicador" name="indicador">
+          <option value="">Todos os indicadores</option>
+          {% for i in opcoes.indicadores %}
+          <option value="{{ i.chave }}" {% if i.chave == selecionado.indicador %}selected{% endif %}>{{ i.nome }} ({{ i.unidade }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-3 col-xl">
+        <label class="form-label" for="f-regiao">Região</label>
+        <select class="form-select" id="f-regiao" name="regiao">
+          <option value="">Brasil (todas)</option>
+          {% for r in opcoes.regioes %}
+          <option value="{{ r.codigo }}" {% if r.codigo == selecionado.regiao %}selected{% endif %}>{{ r.nome }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-3 col-xl">
+        <label class="form-label" for="f-estado">Estado</label>
+        <select class="form-select" id="f-estado" name="estado" data-selecionado="{{ selecionado.estado }}">
+          <option value="">Todos os estados</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-3 col-xl">
+        <label class="form-label" for="f-ano">Ano</label>
+        <select class="form-select" id="f-ano" name="ano">
+          <option value="">Mais recente</option>
+          {% for ano in opcoes.anos %}
+          <option value="{{ ano }}" {% if ano|string == selecionado.ano %}selected{% endif %}>{{ ano }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-3 col-xl">
+        <label class="form-label" for="f-mes">Mês de referência</label>
+        <select class="form-select" id="f-mes" name="mes" data-selecionado="{{ selecionado.mes }}">
+          <option value="">Mais recente</option>
+        </select>
+      </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mt-3">
+      <button class="btn btn-primary" type="submit"><i class="bi bi-search"></i> Consultar</button>
+      <button class="btn btn-outline-secondary" type="button" id="btn-limpar"><i class="bi bi-x-circle"></i> Limpar filtros</button>
+      <button class="btn btn-outline-success ms-md-auto" type="button" id="btn-csv"><i class="bi bi-filetype-csv"></i> Exportar CSV</button>
+    </div>
+  </div>
+</form>
+
+<article class="card cartao">
+  <div class="card-header cartao-cabecalho flex-wrap">
+    <div>
+      <h2 class="cartao-titulo">Resultados</h2>
+      <p class="cartao-subtitulo" id="resumo-resultados">—</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <div class="input-group input-group-sm campo-busca">
+        <span class="input-group-text"><i class="bi bi-search" aria-hidden="true"></i></span>
+        <input type="search" class="form-control" id="f-busca" placeholder="Pesquisar nos resultados…"
+               aria-label="Pesquisar nos resultados" maxlength="100" value="{{ selecionado.busca }}">
+      </div>
+      <select class="form-select form-select-sm w-auto" id="f-por-pagina" aria-label="Itens por página">
+        <option value="25">25 por página</option>
+        <option value="50">50 por página</option>
+        <option value="100">100 por página</option>
+      </select>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover tabela-dados mb-0" id="tabela-producao">
+      <thead>
+        <tr>
+          <th scope="col"><button type="button" class="ordenar" data-coluna="produto">Produto</button></th>
+          <th scope="col"><button type="button" class="ordenar" data-coluna="localidade">Localidade</button></th>
+          <th scope="col"><button type="button" class="ordenar" data-coluna="indicador">Indicador</button></th>
+          <th scope="col" class="text-end"><button type="button" class="ordenar" data-coluna="valor">Valor</button></th>
+          <th scope="col"><button type="button" class="ordenar" data-coluna="unidade">Unidade de medida</button></th>
+          <th scope="col"><button type="button" class="ordenar" data-coluna="ano">Ano</button></th>
+          <th scope="col"><button type="button" class="ordenar" data-coluna="mes">Mês de referência</button></th>
+        </tr>
+      </thead>
+      <tbody id="tabela-corpo">
+        <tr><td colspan="7" class="text-center text-secondary py-5">Carregando…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer cartao-rodape">
+    <span id="info-paginacao" class="text-secondary"></span>
+    <nav aria-label="Paginação dos resultados"><ul class="pagination pagination-sm mb-0" id="paginacao"></ul></nav>
+  </div>
+</article>
+
+<p class="nota-fonte" id="nota-fonte"></p>
+
+<script type="application/json" id="dados-opcoes">{{ opcoes|tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/producao.js') }}"></script>
+{% endblock %}

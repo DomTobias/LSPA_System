@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block titulo %}Dashboard{% endblock %}
+{% block titulo_pagina %}Dashboard da safra{% endblock %}
+{% block subtitulo_pagina %}Estimativas do LSPA para o Brasil, regiões e estados{% endblock %}
+
+{% block conteudo %}
+{% for aviso in opcoes.avisos %}
+<div class="alert alert-warning d-flex gap-2"><i class="bi bi-exclamation-triangle"></i><div>{{ aviso }}</div></div>
+{% endfor %}
+
+<form class="card cartao barra-filtros" id="form-dashboard" autocomplete="off">
+  <div class="card-body">
+    <div class="row g-3 align-items-end">
+      <div class="col-12 col-md-5 col-xl-4">
+        <label class="form-label" for="f-produto">Produto agrícola</label>
+        <select class="form-select" id="f-produto" name="produto">
+          {% for p in opcoes.produtos if p.nivel > 0 %}
+          <option value="{{ p.codigo }}" {% if p.codigo == selecionado.produto %}selected{% endif %}>
+            {{ "    " * (p.nivel - 1) }}{{ p.nome }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label" for="f-ano">Ano da safra</label>
+        <select class="form-select" id="f-ano" name="ano">
+          <option value="">Mais recente</option>
+          {% for ano in opcoes.anos %}
+          <option value="{{ ano }}" {% if ano|string == selecionado.ano %}selected{% endif %}>{{ ano }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-3 col-xl-2">
+        <label class="form-label" for="f-mes">Mês de referência</label>
+        <select class="form-select" id="f-mes" name="mes" data-selecionado="{{ selecionado.mes }}">
+          <option value="">Mais recente</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-2 col-xl-2 d-grid">
+        <button class="btn btn-primary" type="submit"><i class="bi bi-funnel"></i> Aplicar</button>
+      </div>
+    </div>
+  </div>
+</form>
+
+<div id="dashboard-conteudo" class="carregando">
+  <p class="contexto-periodo" id="contexto-periodo">Carregando dados do IBGE…</p>
+
+  <!-- Indicadores -->
+  <section class="row g-3 mb-3" aria-label="Indicadores">
+    {% set cards = [
+      ("producao", "Produção", "bi-basket2"),
+      ("area_plantada", "Área plantada", "bi-grid-3x3-gap"),
+      ("area_colhida", "Área colhida", "bi-scissors"),
+      ("rendimento_medio", "Rendimento médio", "bi-graph-up-arrow"),
+    ] %}
+    {% for chave, nome, icone in cards %}
+    <div class="col-12 col-sm-6 col-xl-3">
+      <article class="card cartao kpi" id="kpi-{{ chave }}">
+        <div class="card-body">
+          <div class="kpi-topo">
+            <span class="kpi-rotulo">{{ nome }}</span>
+            <span class="kpi-icone" aria-hidden="true"><i class="bi {{ icone }}"></i></span>
+          </div>
+          <div class="kpi-valor" data-campo="valor"><span class="esqueleto"></span></div>
+          <div class="kpi-unidade" data-campo="unidade">&nbsp;</div>
+          <div class="kpi-variacoes" data-campo="variacoes"></div>
+        </div>
+      </article>
+    </div>
+    {% endfor %}
+  </section>
+
+  <!-- Evolução e comparação entre períodos -->
+  <section class="row g-3 mb-3">
+    <div class="col-12 col-xl-8">
+      <article class="card cartao h-100">
+        <div class="card-header cartao-cabecalho">
+          <div>
+            <h2 class="cartao-titulo">Evolução por período</h2>
+            <p class="cartao-subtitulo" id="evolucao-subtitulo">Brasil</p>
+          </div>
+          <div class="d-flex flex-wrap gap-2">
+            <select class="form-select form-select-sm w-auto" id="evolucao-indicador" aria-label="Indicador da evolução">
+              <option value="producao">Produção</option>
+              <option value="area_plantada">Área plantada</option>
+              <option value="area_colhida">Área colhida</option>
+              <option value="rendimento_medio">Rendimento médio</option>
+            </select>
+            <div class="btn-group btn-group-sm" role="group" aria-label="Modo da evolução">
+              <input type="radio" class="btn-check" name="evolucao-modo" id="modo-anual" value="anual" checked>
+              <label class="btn btn-outline-secondary" for="modo-anual">Anual</label>
+              <input type="radio" class="btn-check" name="evolucao-modo" id="modo-mensal" value="mensal">
+              <label class="btn btn-outline-secondary" for="modo-mensal">Mensal</label>
+            </div>
+          </div>
+        </div>
+        <div class="card-body"><div class="grafico-area"><canvas id="grafico-evolucao" role="img" aria-label="Gráfico de evolução"></canvas></div></div>
+      </article>
+    </div>
+    <div class="col-12 col-xl-4">
+      <article class="card cartao h-100">
+        <div class="card-header cartao-cabecalho">
+          <div>
+            <h2 class="cartao-titulo">Comparação entre períodos</h2>
+            <p class="cartao-subtitulo" id="regioes-subtitulo">Produção por grande região</p>
+          </div>
+        </div>
+        <div class="card-body"><div class="grafico-area"><canvas id="grafico-regioes" role="img" aria-label="Produção por região em dois períodos"></canvas></div></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- Estados e ranking -->
+  <section class="row g-3 mb-3">
+    <div class="col-12 col-xl-8">
+      <article class="card cartao h-100">
+        <div class="card-header cartao-cabecalho">
+          <div>
+            <h2 class="cartao-titulo">Produção por estado</h2>
+            <p class="cartao-subtitulo" id="estados-subtitulo">Unidades da Federação</p>
+          </div>
+        </div>
+        <div class="card-body"><div class="grafico-area"><canvas id="grafico-estados" role="img" aria-label="Produção por estado"></canvas></div></div>
+      </article>
+    </div>
+    <div class="col-12 col-xl-4">
+      <article class="card cartao h-100">
+        <div class="card-header cartao-cabecalho">
+          <div>
+            <h2 class="cartao-titulo">Ranking dos estados produtores</h2>
+            <p class="cartao-subtitulo">Participação na produção nacional</p>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <table class="table tabela-ranking mb-0">
+            <thead><tr><th scope="col">#</th><th scope="col">Estado</th><th scope="col" class="text-end">Produção</th><th scope="col" class="text-end">Var. anual</th></tr></thead>
+            <tbody id="ranking-corpo"><tr><td colspan="4" class="text-center text-secondary py-4">Carregando…</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- Produtos -->
+  <section class="row g-3 mb-3">
+    <div class="col-12">
+      <article class="card cartao">
+        <div class="card-header cartao-cabecalho">
+          <div>
+            <h2 class="cartao-titulo">Comparação entre produtos agrícolas</h2>
+            <p class="cartao-subtitulo" id="produtos-subtitulo">Maiores produções no Brasil</p>
+          </div>
+        </div>
+        <div class="card-body"><div class="grafico-area grafico-alto"><canvas id="grafico-produtos" role="img" aria-label="Comparação entre produtos agrícolas"></canvas></div></div>
+      </article>
+    </div>
+  </section>
+
+  <p class="nota-fonte" id="nota-fonte"></p>
+</div>
+
+<script type="application/json" id="dados-opcoes">{{ opcoes|tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,35 @@
+<aside class="sidebar offcanvas-lg offcanvas-start" tabindex="-1" id="sidebar" aria-labelledby="sidebar-titulo">
+  <div class="sidebar-marca">
+    <span class="sidebar-logo" aria-hidden="true"><i class="bi bi-flower1"></i></span>
+    <div>
+      <div class="sidebar-titulo" id="sidebar-titulo">{{ app_nome }}</div>
+      <div class="sidebar-subtitulo">Produção agrícola · IBGE</div>
+    </div>
+    <button type="button" class="btn-close btn-close-white d-lg-none ms-auto" data-bs-dismiss="offcanvas"
+            data-bs-target="#sidebar" aria-label="Fechar menu"></button>
+  </div>
+
+  <nav class="sidebar-nav" aria-label="Navegação principal">
+    <div class="sidebar-secao">Análise</div>
+    <a class="sidebar-link {% if pagina_ativa == 'dashboard' %}ativo{% endif %}" href="{{ url_for('dashboard.index') }}"
+       {% if pagina_ativa == 'dashboard' %}aria-current="page"{% endif %}>
+      <i class="bi bi-speedometer2"></i> Dashboard
+    </a>
+    <a class="sidebar-link {% if pagina_ativa == 'producao' %}ativo{% endif %}" href="{{ url_for('producao.index') }}"
+       {% if pagina_ativa == 'producao' %}aria-current="page"{% endif %}>
+      <i class="bi bi-table"></i> Consulta de produção
+    </a>
+
+    <div class="sidebar-secao">Fonte oficial</div>
+    <a class="sidebar-link" href="https://sidra.ibge.gov.br/pesquisa/lspa/tabelas" target="_blank" rel="noopener noreferrer">
+      <i class="bi bi-box-arrow-up-right"></i> Tabelas do LSPA
+    </a>
+    <a class="sidebar-link" href="https://apisidra.ibge.gov.br/" target="_blank" rel="noopener noreferrer">
+      <i class="bi bi-code-slash"></i> API SIDRA
+    </a>
+  </nav>
+
+  <div class="sidebar-rodape">
+    <i class="bi bi-database"></i> Tabela SIDRA 6588
+  </div>
+</aside>
