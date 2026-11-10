@@ -433,5 +433,9 @@ implementação com a mesma interface `conexao()` e adapte o dialeto do reposit�
 indica as equivalências de tipos.
 
 ## Equipe
+- Gabriel Tobias 
+- João Batista
+- Gabriella Batista 
+- Elis Lívero
 - Jennifer Iwazaki
 
