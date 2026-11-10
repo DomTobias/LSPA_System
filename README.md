@@ -257,11 +257,12 @@ seção "Migração futura para MySQL" abaixo).
 
 ## Arquitetura de Solução
 
-O sistema separa o atendimento HTTP do processamento periódico dos dados. O
-Docker Swarm agenda o serviço `manager` em nó(s) manager e duas réplicas do
-serviço `worker` em nós worker. Os serviços usam a mesma imagem, com comandos
-de inicialização diferentes. A topologia abaixo mostra os papéis e as
-dependências externas:
+O sistema separa o atendimento HTTP do pré-processamento periódico dos dados.
+O Docker Swarm agenda uma réplica do serviço de aplicação `manager` em um nó
+com papel Swarm manager e duas réplicas do serviço `worker` em nós com papel
+Swarm worker. As duas réplicas do worker podem ser colocadas no mesmo nó: o
+Compose restringe o papel do nó, mas não exige uma réplica por máquina. Ambos
+os serviços usam a mesma imagem com comandos diferentes.
 
 ```mermaid
 flowchart TB
@@ -270,16 +271,17 @@ flowchart TB
 
     subgraph swarm["Cluster Docker Swarm"]
         control["Control plane do Swarm<br/>agenda serviços e mantém réplicas"]
-        subgraph manager_node["Nó com role manager"]
-            manager["Serviço manager · 1 réplica<br/>Gunicorn · Flask · porta 5000"]
+        subgraph manager_node["Nó Swarm · role manager"]
+            manager["Serviço de aplicação manager · 1 réplica<br/>Gunicorn · Flask · porta 5000"]
         end
-        subgraph worker_nodes["Nós com role worker"]
+        subgraph worker_nodes["Nó(s) Swarm · role worker · placement não garante distribuição"]
             worker1["Serviço worker · réplica 1<br/>worker.py · ETL periódico"]
             worker2["Serviço worker · réplica 2<br/>worker.py · ETL periódico"]
         end
-        overlay[("Rede overlay lspa_net")]
-        data[("Volume lspa_data<br/>database/lspa.db")]
-        logs[("Volume lspa_logs")]
+        overlay[("Rede overlay lspa_net<br/>tráfego entre containers")]
+        data_mgr[("Volume local lspa_data<br/>no host do manager")]
+        data_worker[("Volume local lspa_data<br/>em cada host worker")]
+        logs[("Volumes locais lspa_logs<br/>por host")]
     end
 
     navegador -->|"HTTP :5000 · routing mesh"| manager
@@ -289,9 +291,9 @@ flowchart TB
     manager --- overlay
     worker1 --- overlay
     worker2 --- overlay
-    manager -->|"consulta dados/cache"| data
-    worker1 -->|"grava dados/cache"| data
-    worker2 -->|"grava dados/cache"| data
+    manager -->|"consulta dados/cache"| data_mgr
+    worker1 -->|"grava dados/cache"| data_worker
+    worker2 -->|"grava dados/cache"| data_worker
     manager -.-> logs
     worker1 -.-> logs
     worker2 -.-> logs
@@ -303,17 +305,18 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    subgraph web["Componente Web · serviço manager"]
-        browser[Cliente]
+    browser[Cliente HTTP]
+    subgraph web["Aplicação Flask · serviço manager"]
         routes[Rotas / Blueprints]
         controllers[Controllers]
         services[Services]
-        views[Views · Jinja2 / JSON / CSV]
-        browser --> routes --> controllers --> services --> views
+        output["Resposta renderizada<br/>Jinja2 / JSON / CSV"]
+        routes --> controllers --> services
+        controllers --> output
     end
 
     subgraph etl["Componente ETL · serviço worker"]
-        loop["worker.py · ciclo periódico"]
+        loop["worker.py · ciclo a cada 1800 s por padrão"]
         sidra_service[SidraService]
         client["SidraClient + Parser"]
         loop --> sidra_service --> client
@@ -326,7 +329,9 @@ flowchart LR
     end
 
     ibge["API SIDRA / IBGE"]
+    browser --> routes
     services --> repository
+    services --> client
     sidra_service --> repository
     client <-->|HTTPS| ibge
 ```
@@ -347,29 +352,45 @@ sequenceDiagram
 
     loop A cada WORKER_INTERVALO_SEGUNDOS (padrão 1800)
         W->>S: Atualiza metadados e pré-aquece dashboard
-        S->>API: Requisições HTTPS de metadados/dados
-        API-->>S: Respostas JSON
-        S->>R: Normaliza e persiste dados/cache
-        R->>DB: INSERT/UPDATE
-        DB-->>R: Confirmação
+        S->>R: Verifica cache e TTL
+        R->>DB: Lê registros e data da consulta
+        DB-->>R: Cache e timestamp
+        alt Cache válido
+            R-->>S: Retorna dados locais
+        else Cache vencido ou ausente
+            S->>API: Requisição HTTPS
+            API-->>S: Resposta JSON
+            S->>R: Normaliza e persiste dados/cache
+            R->>DB: INSERT/UPDATE
+            DB-->>R: Confirmação
+        end
     end
 
     U->>M: GET /api/dashboard ou /api/producao
     M->>C: Encaminha rota e parâmetros
-    C->>R: Consulta dados e cache
+    C->>R: Consulta serviço e cache
     R->>DB: SELECT
     DB-->>R: Resultados persistidos
-    R-->>C: Dados de domínio
+    alt Cache válido
+        R-->>C: Dados locais
+    else Cache vencido ou ausente
+        C->>API: Atualização sob demanda via SidraService
+        API-->>C: Dados SIDRA/IBGE
+        C->>R: Registra consulta e salva dados
+        R->>DB: INSERT/UPDATE
+        DB-->>R: Confirmação
+    end
     C-->>M: Resposta HTML/JSON/CSV
     M-->>U: HTTP 200 (ou erro HTTP apropriado)
 ```
 
-**Armazenamento em cluster:** os volumes nomeados deste Compose usam o driver
-`local`, que não compartilha arquivos entre hosts. Para que manager e workers
-em máquinas distintas acessem o mesmo SQLite, configure `lspa_data` e
-`lspa_logs` com backend compartilhado (por exemplo, NFS) ou migre para um banco
-cliente-servidor. Sem isso, as réplicas em hosts diferentes terão cópias
-locais distintas do banco; veja [Armazenamento compartilhado](#armazenamento-compartilhado).
+**Limitação do armazenamento no Compose atual:** as caixas de volume no
+diagrama representam o mesmo nome lógico de volume, mas o driver `local` cria
+armazenamento separado por host. Portanto, a topologia padrão não fornece um
+banco compartilhado entre manager e workers que estejam em máquinas distintas.
+Para essa implantação, configure `lspa_data` e `lspa_logs` com backend
+compartilhado (por exemplo, NFS) ou migre para um banco cliente-servidor. Veja
+[Armazenamento compartilhado](#armazenamento-compartilhado).
 
 ---
 
