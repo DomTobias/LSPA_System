@@ -313,3 +313,7 @@ O acesso ao banco passa por `database.connection.Database`. Para usar MySQL, cri
 implementação com a mesma interface `conexao()` e adapte o dialeto do repositório
 (placeholders `%s`, `ON DUPLICATE KEY UPDATE` no lugar de `ON CONFLICT`). O `schema.sql`
 indica as equivalências de tipos.
+
+## Equipe
+- Jennifer Iwazaki
+
