@@ -255,6 +255,124 @@ seção "Migração futura para MySQL" abaixo).
 
 ---
 
+## Arquitetura de Solução
+
+O sistema separa o atendimento HTTP do processamento periódico dos dados. O
+Docker Swarm agenda o serviço `manager` em nó(s) manager e duas réplicas do
+serviço `worker` em nós worker. Os serviços usam a mesma imagem, com comandos
+de inicialização diferentes. A topologia abaixo mostra os papéis e as
+dependências externas:
+
+```mermaid
+flowchart TB
+    navegador["Navegador / cliente HTTP"]
+    sidra["API SIDRA / IBGE"]
+
+    subgraph swarm["Cluster Docker Swarm"]
+        control["Control plane do Swarm<br/>agenda serviços e mantém réplicas"]
+        subgraph manager_node["Nó com role manager"]
+            manager["Serviço manager · 1 réplica<br/>Gunicorn · Flask · porta 5000"]
+        end
+        subgraph worker_nodes["Nós com role worker"]
+            worker1["Serviço worker · réplica 1<br/>worker.py · ETL periódico"]
+            worker2["Serviço worker · réplica 2<br/>worker.py · ETL periódico"]
+        end
+        overlay[("Rede overlay lspa_net")]
+        data[("Volume lspa_data<br/>database/lspa.db")]
+        logs[("Volume lspa_logs")]
+    end
+
+    navegador -->|"HTTP :5000 · routing mesh"| manager
+    control -. "placement constraints" .-> manager
+    control -. "placement constraints" .-> worker1
+    control -. "placement constraints" .-> worker2
+    manager --- overlay
+    worker1 --- overlay
+    worker2 --- overlay
+    manager -->|"consulta dados/cache"| data
+    worker1 -->|"grava dados/cache"| data
+    worker2 -->|"grava dados/cache"| data
+    manager -.-> logs
+    worker1 -.-> logs
+    worker2 -.-> logs
+    worker1 -->|"HTTPS · consulta periódica"| sidra
+    worker2 -->|"HTTPS · consulta periódica"| sidra
+```
+
+### Diagrama UML de componentes e responsabilidades
+
+```mermaid
+flowchart LR
+    subgraph web["Componente Web · serviço manager"]
+        browser[Cliente]
+        routes[Rotas / Blueprints]
+        controllers[Controllers]
+        services[Services]
+        views[Views · Jinja2 / JSON / CSV]
+        browser --> routes --> controllers --> services --> views
+    end
+
+    subgraph etl["Componente ETL · serviço worker"]
+        loop["worker.py · ciclo periódico"]
+        sidra_service[SidraService]
+        client["SidraClient + Parser"]
+        loop --> sidra_service --> client
+    end
+
+    subgraph persistence["Componente de persistência"]
+        repository[ProducaoRepository]
+        database["Database · SQLite"]
+        repository --> database
+    end
+
+    ibge["API SIDRA / IBGE"]
+    services --> repository
+    sidra_service --> repository
+    client <-->|HTTPS| ibge
+```
+
+### Diagrama UML de sequência: atualização e consulta
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant W as Worker (worker.py)
+    participant S as SidraService
+    participant API as API SIDRA/IBGE
+    participant R as ProducaoRepository
+    participant DB as SQLite compartilhado
+    participant U as Cliente HTTP
+    participant M as Manager (Flask/Gunicorn)
+    participant C as Controller/Service
+
+    loop A cada WORKER_INTERVALO_SEGUNDOS (padrão 1800)
+        W->>S: Atualiza metadados e pré-aquece dashboard
+        S->>API: Requisições HTTPS de metadados/dados
+        API-->>S: Respostas JSON
+        S->>R: Normaliza e persiste dados/cache
+        R->>DB: INSERT/UPDATE
+        DB-->>R: Confirmação
+    end
+
+    U->>M: GET /api/dashboard ou /api/producao
+    M->>C: Encaminha rota e parâmetros
+    C->>R: Consulta dados e cache
+    R->>DB: SELECT
+    DB-->>R: Resultados persistidos
+    R-->>C: Dados de domínio
+    C-->>M: Resposta HTML/JSON/CSV
+    M-->>U: HTTP 200 (ou erro HTTP apropriado)
+```
+
+**Armazenamento em cluster:** os volumes nomeados deste Compose usam o driver
+`local`, que não compartilha arquivos entre hosts. Para que manager e workers
+em máquinas distintas acessem o mesmo SQLite, configure `lspa_data` e
+`lspa_logs` com backend compartilhado (por exemplo, NFS) ou migre para um banco
+cliente-servidor. Sem isso, as réplicas em hosts diferentes terão cópias
+locais distintas do banco; veja [Armazenamento compartilhado](#armazenamento-compartilhado).
+
+---
+
 ## Arquitetura (MVC)
 
 ```
