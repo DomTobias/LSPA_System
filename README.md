@@ -264,6 +264,11 @@ Swarm worker. As duas réplicas do worker podem ser colocadas no mesmo nó: o
 Compose restringe o papel do nó, mas não exige uma réplica por máquina. Ambos
 os serviços usam a mesma imagem com comandos diferentes.
 
+Os diagramas abaixo têm visualização Mermaid no GitHub. As versões em notação
+UML formal (PlantUML), com fontes editáveis, estão em [`docs/uml/`](docs/uml/):
+[implantação](docs/uml/implantacao.puml), [componentes](docs/uml/componentes.puml) e
+[sequência](docs/uml/sequencia.puml).
+
 ```mermaid
 flowchart TB
     navegador["Navegador / cliente HTTP"]
@@ -301,7 +306,7 @@ flowchart TB
     worker2 -->|"HTTPS · consulta periódica"| sidra
 ```
 
-### Diagrama UML de componentes e responsabilidades
+### Visão dos componentes e responsabilidades (Mermaid)
 
 ```mermaid
 flowchart LR
@@ -336,7 +341,7 @@ flowchart LR
     client <-->|HTTPS| ibge
 ```
 
-### Diagrama UML de sequência: atualização e consulta
+### Sequência de atualização e consulta (visualização Mermaid)
 
 ```mermaid
 sequenceDiagram

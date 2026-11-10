@@ -1,0 +1,58 @@
+@startuml
+ title Diagrama UML de Sequencia - LSPA-System
+ autonumber
+
+ actor "Cliente HTTP" as User
+ participant "Manager\nFlask/Gunicorn" as Manager
+ participant "Controller / Service" as App
+ participant "SidraService" as SidraService
+ participant "ProducaoRepository" as Repo
+ database "SQLite" as DB
+ participant "SidraClient + Parser" as Client
+ participant "API SIDRA / IBGE" as API
+ participant "Worker\nworker.py" as Worker
+
+ == Consulta HTTP ==
+ User -> Manager : GET /api/dashboard ou /api/producao
+ Manager -> App : encaminha rota e parametros
+ App -> SidraService : solicita dados
+ SidraService -> Repo : consulta timestamp/cache
+ Repo -> DB : SELECT consulta e dados
+ DB --> Repo : registro e dados locais
+ alt cache dentro do TTL
+   Repo --> SidraService : retorna dados em cache
+ else cache vencido ou ausente
+   SidraService -> Client : consulta SIDRA
+   Client -> API : HTTPS
+   API --> Client : JSON
+   Client -> SidraService : dados interpretados
+   SidraService -> Repo : registra consulta e salva dados
+   Repo -> DB : INSERT/UPDATE
+   DB --> Repo : confirmacao
+   Repo --> SidraService : dados persistidos
+ else SIDRA indisponivel e ha cache anterior
+   SidraService --> App : dados locais vencidos + aviso
+ end
+ SidraService --> App : resultado
+ App --> Manager : HTML/JSON/CSV
+ Manager --> User : resposta HTTP
+
+ == Ciclo periodico do Worker ==
+ loop WORKER_INTERVALO_SEGUNDOS (padrao 1800 s)
+   Worker -> SidraService : atualiza metadados e pre-aquece dashboard
+   SidraService -> Repo : verifica cache e TTL
+   Repo -> DB : le estado local
+   DB --> Repo : cache e timestamp
+   alt metadado/cache valido
+     Repo --> SidraService : dados locais
+   else vencido ou ausente
+     SidraService -> Client : consulta remota
+     Client -> API : HTTPS
+     API --> Client : JSON
+     Client -> SidraService : dados normalizados
+     SidraService -> Repo : salva dados/cache
+     Repo -> DB : INSERT/UPDATE
+     DB --> Repo : confirmacao
+   end
+ end
+@enduml

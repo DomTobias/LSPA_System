@@ -1,0 +1,48 @@
+@startuml
+ title Diagrama UML de Componentes - LSPA-System
+ left to right direction
+ skinparam componentStyle uml2
+
+ actor "Cliente HTTP" as client
+ component "API SIDRA / IBGE" as sidra
+
+ package "Servico de aplicacao manager" {
+   component "Rotas / Blueprints" as routes
+   component "Controllers" as controllers
+   component "Services Flask\nProducaoService / DashboardService" as app_services
+   component "Views\nJinja2 / JSON / CSV" as views
+   routes --> controllers
+   controllers --> app_services
+   controllers --> views : renderiza resposta
+ }
+
+ package "Servico worker" {
+   component "worker.py\nCiclo periodico" as worker
+ }
+
+ package "Componentes compartilhados pela imagem" {
+   component "SidraService\ncache e regras SIDRA" as sidra_service
+   component "SidraClient\nHTTP + timeout/retries" as sidra_client
+   component "Parser SIDRA" as parser
+   component "ProducaoRepository" as repository
+   component "Database" as database
+   database "SQLite\nlspa.db" as sqlite
+ }
+
+ client --> routes : requisicao HTTP
+ app_services --> sidra_service : consultas web
+ worker --> sidra_service : ETL e pre-aquecimento
+ sidra_service --> sidra_client : busca remota se cache vencer
+ sidra_client --> sidra : HTTPS
+ sidra_client --> parser : JSON bruto
+ parser --> sidra_service : entidades normalizadas
+ sidra_service --> repository : leitura/gravação
+ app_services --> repository : leitura/cache
+ repository --> database : conexao
+ database --> sqlite : SQL
+
+ note bottom of sqlite
+   Em implantacao distribuida, o volume local padrao
+   nao compartilha este arquivo entre hosts.
+ end note
+@enduml

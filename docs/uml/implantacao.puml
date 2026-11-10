@@ -1,0 +1,48 @@
+@startuml
+ title Diagrama UML de Implantacao - LSPA-System
+ left to right direction
+ skinparam componentStyle uml2
+
+ actor "Cliente HTTP" as client
+ cloud "API SIDRA / IBGE" as sidra
+
+ node "Cluster Docker Swarm" as swarm {
+   component "Control plane\nDocker Swarm" as control
+
+   node "No Swarm\nrole = manager" as manager_node {
+     artifact "Servico de aplicacao: manager\n1 replica\nGunicorn + Flask\nporta 5000" as manager
+     database "Volume local lspa_data\nSQLite" as manager_data
+     folder "Volume local lspa_logs" as manager_logs
+   }
+
+   node "No(s) Swarm\nrole = worker" as worker_nodes {
+     artifact "Servico worker\n2 replicas\nworker.py\nETL periodico" as workers
+     database "Volume local lspa_data\nSQLite por host" as worker_data
+     folder "Volume local lspa_logs\npor host" as worker_logs
+   }
+
+   cloud "Rede overlay\nlspa_net" as overlay
+ }
+
+ client --> manager : HTTP :5000\nroteamento mesh
+ control ..> manager : placement\nnode.role == manager
+ control ..> workers : placement\nnode.role == worker
+ manager -- overlay
+ workers -- overlay
+ manager --> manager_data : monta /app/database
+ manager --> manager_logs : monta /app/logs
+ workers --> worker_data : monta /app/database
+ workers --> worker_logs : monta /app/logs
+ workers --> sidra : HTTPS periodico\nmetadados e dados
+ manager --> sidra : HTTPS sob demanda\ncache vencido/ausente
+
+ note bottom of worker_nodes
+   O Compose limita o papel do no, mas nao distribui
+   obrigatoriamente as duas replicas entre hosts.
+ end note
+ note bottom of manager_data
+   O driver local cria volumes independentes por host.
+   Os volumes lspa_data de manager e workers nao sao
+   compartilhados em hosts diferentes sem backend de rede.
+ end note
+@enduml
