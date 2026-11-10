@@ -1,6 +1,6 @@
 @startuml
  title Diagrama UML de Componentes - LSPA-System
- left to right direction
+ top to bottom direction
  skinparam componentStyle uml2
 
  actor "Cliente HTTP" as client

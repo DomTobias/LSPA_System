@@ -264,135 +264,39 @@ Swarm worker. As duas réplicas do worker podem ser colocadas no mesmo nó: o
 Compose restringe o papel do nó, mas não exige uma réplica por máquina. Ambos
 os serviços usam a mesma imagem com comandos diferentes.
 
-Os diagramas abaixo têm visualização Mermaid no GitHub. As versões em notação
-UML formal (PlantUML), com fontes editáveis, estão em [`docs/uml/`](docs/uml/):
-[implantação](docs/uml/implantacao.puml), [componentes](docs/uml/componentes.puml) e
-[sequência](docs/uml/sequencia.puml).
+Os diagramas UML abaixo estão renderizados em SVG para visualização direta no
+GitHub. As fontes PlantUML editáveis estão em [`docs/uml/`](docs/uml/).
 
-```mermaid
-flowchart TB
-    navegador["Navegador / cliente HTTP"]
-    sidra["API SIDRA / IBGE"]
+### Diagrama UML de implantação
 
-    subgraph swarm["Cluster Docker Swarm"]
-        control["Control plane do Swarm<br/>agenda serviços e mantém réplicas"]
-        subgraph manager_node["Nó Swarm · role manager"]
-            manager["Serviço de aplicação manager · 1 réplica<br/>Gunicorn · Flask · porta 5000"]
-        end
-        subgraph worker_nodes["Nó(s) Swarm · role worker · placement não garante distribuição"]
-            worker1["Serviço worker · réplica 1<br/>worker.py · ETL periódico"]
-            worker2["Serviço worker · réplica 2<br/>worker.py · ETL periódico"]
-        end
-        overlay[("Rede overlay lspa_net<br/>tráfego entre containers")]
-        data_mgr[("Volume local lspa_data<br/>no host do manager")]
-        data_worker[("Volume local lspa_data<br/>em cada host worker")]
-        logs[("Volumes locais lspa_logs<br/>por host")]
-    end
+Mostra os nós do cluster, os serviços e réplicas, a rede, os volumes por host e
+as conexões com o cliente e com o SIDRA/IBGE.
 
-    navegador -->|"HTTP :5000 · routing mesh"| manager
-    control -. "placement constraints" .-> manager
-    control -. "placement constraints" .-> worker1
-    control -. "placement constraints" .-> worker2
-    manager --- overlay
-    worker1 --- overlay
-    worker2 --- overlay
-    manager -->|"consulta dados/cache"| data_mgr
-    worker1 -->|"grava dados/cache"| data_worker
-    worker2 -->|"grava dados/cache"| data_worker
-    manager -.-> logs
-    worker1 -.-> logs
-    worker2 -.-> logs
-    worker1 -->|"HTTPS · consulta periódica"| sidra
-    worker2 -->|"HTTPS · consulta periódica"| sidra
-```
+![Diagrama UML de implantação do LSPA-System](docs/uml/implantacao.svg)
 
-### Visão dos componentes e responsabilidades (Mermaid)
+Fonte: [implantacao.puml](docs/uml/implantacao.puml).
 
-```mermaid
-flowchart LR
-    browser[Cliente HTTP]
-    subgraph web["Aplicação Flask · serviço manager"]
-        routes[Rotas / Blueprints]
-        controllers[Controllers]
-        services[Services]
-        output["Resposta renderizada<br/>Jinja2 / JSON / CSV"]
-        routes --> controllers --> services
-        controllers --> output
-    end
+### Diagrama UML de componentes
 
-    subgraph etl["Componente ETL · serviço worker"]
-        loop["worker.py · ciclo a cada 1800 s por padrão"]
-        sidra_service[SidraService]
-        client["SidraClient + Parser"]
-        loop --> sidra_service --> client
-    end
+Mostra os componentes da aplicação web e do worker, além dos serviços,
+integração externa e persistência compartilhados pela imagem.
 
-    subgraph persistence["Componente de persistência"]
-        repository[ProducaoRepository]
-        database["Database · SQLite"]
-        repository --> database
-    end
+![Diagrama UML de componentes do LSPA-System](docs/uml/componentes.svg)
 
-    ibge["API SIDRA / IBGE"]
-    browser --> routes
-    services --> repository
-    services --> client
-    sidra_service --> repository
-    client <-->|HTTPS| ibge
-```
+Fonte: [componentes.puml](docs/uml/componentes.puml).
 
-### Sequência de atualização e consulta (visualização Mermaid)
+### Diagrama UML de sequência
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant W as Worker (worker.py)
-    participant S as SidraService
-    participant API as API SIDRA/IBGE
-    participant R as ProducaoRepository
-    participant DB as SQLite compartilhado
-    participant U as Cliente HTTP
-    participant M as Manager (Flask/Gunicorn)
-    participant C as Controller/Service
+Mostra o caminho da consulta HTTP, o uso do cache e a atualização periódica
+executada pelo worker.
 
-    loop A cada WORKER_INTERVALO_SEGUNDOS (padrão 1800)
-        W->>S: Atualiza metadados e pré-aquece dashboard
-        S->>R: Verifica cache e TTL
-        R->>DB: Lê registros e data da consulta
-        DB-->>R: Cache e timestamp
-        alt Cache válido
-            R-->>S: Retorna dados locais
-        else Cache vencido ou ausente
-            S->>API: Requisição HTTPS
-            API-->>S: Resposta JSON
-            S->>R: Normaliza e persiste dados/cache
-            R->>DB: INSERT/UPDATE
-            DB-->>R: Confirmação
-        end
-    end
+![Diagrama UML de sequência do LSPA-System](docs/uml/sequencia.svg)
 
-    U->>M: GET /api/dashboard ou /api/producao
-    M->>C: Encaminha rota e parâmetros
-    C->>R: Consulta serviço e cache
-    R->>DB: SELECT
-    DB-->>R: Resultados persistidos
-    alt Cache válido
-        R-->>C: Dados locais
-    else Cache vencido ou ausente
-        C->>API: Atualização sob demanda via SidraService
-        API-->>C: Dados SIDRA/IBGE
-        C->>R: Registra consulta e salva dados
-        R->>DB: INSERT/UPDATE
-        DB-->>R: Confirmação
-    end
-    C-->>M: Resposta HTML/JSON/CSV
-    M-->>U: HTTP 200 (ou erro HTTP apropriado)
-```
+Fonte: [sequencia.puml](docs/uml/sequencia.puml).
 
-**Limitação do armazenamento no Compose atual:** as caixas de volume no
-diagrama representam o mesmo nome lógico de volume, mas o driver `local` cria
-armazenamento separado por host. Portanto, a topologia padrão não fornece um
-banco compartilhado entre manager e workers que estejam em máquinas distintas.
+**Limitação do armazenamento no Compose atual:** o driver `local` cria volumes
+independentes por host. Portanto, manager e workers em máquinas distintas não
+compartilham o mesmo arquivo SQLite apenas por usarem o volume com o mesmo nome.
 Para essa implantação, configure `lspa_data` e `lspa_logs` com backend
 compartilhado (por exemplo, NFS) ou migre para um banco cliente-servidor. Veja
 [Armazenamento compartilhado](#armazenamento-compartilhado).
