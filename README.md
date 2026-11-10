@@ -138,6 +138,123 @@ pytest
 
 ---
 
+## Execução via Docker (Docker Swarm — nós Manager e Worker)
+
+O projeto roda em um cluster **Docker Swarm**, com dois papéis explícitos,
+amarrados aos nós reais do cluster por `deploy.placement.constraints` em
+[docker-compose.yml](docker-compose.yml):
+
+| Serviço | Papel | Constraint de nó | O que faz |
+|---|---|---|---|
+| `manager` | **Coordenador** | `node.role == manager` | Serve a aplicação Flask (páginas, API JSON/CSV) a partir do cache já processado. Não faz ETL. |
+| `worker`  | **Processamento** | `node.role == worker` | Roda [worker.py](worker.py): consulta periodicamente a API SIDRA/IBGE, interpreta as respostas e grava/atualiza o banco compartilhado. Réplicas: 2. |
+
+Os dois serviços usam a mesma imagem ([Dockerfile](Dockerfile)); o papel é
+definido apenas pelo comando executado (`gunicorn` para o manager, `python
+worker.py` para o worker) e pelo nó do Swarm em que o container é agendado.
+
+### 1. Build da imagem
+
+```bash
+docker build -t lspa-system:latest .
+```
+
+### 2. Criar o cluster (1 manager + N workers)
+
+Em máquinas/VMs distintas (ou nós já existentes), execute no nó que será o
+**Manager**:
+
+```bash
+docker swarm init --advertise-addr <IP-DO-MANAGER>
+```
+
+O comando acima imprime um `docker swarm join --token ...`. Copie-o e execute
+em cada máquina que será **Worker**:
+
+```bash
+docker swarm join --token <TOKEN> <IP-DO-MANAGER>:2377
+```
+
+Confirme os papéis do cluster:
+
+```bash
+docker node ls
+# HOSTNAME   STATUS   AVAILABILITY   MANAGER STATUS
+# node-a     Ready    Active         Leader      <- manager
+# node-b     Ready    Active                     <- worker
+# node-c     Ready    Active                     <- worker
+```
+
+> Para testar localmente sem várias máquinas, crie VMs leves (ex.: Multipass,
+> VirtualBox, Hyper-V) cada uma com Docker instalado e una-as ao Swarm com os
+> comandos acima. Sem um nó Worker real no cluster, o serviço `worker` fica
+> pendente (`Pending`), pois a constraint `node.role == worker` não encontra
+> onde agendar.
+
+### 3. Configurar segredos/variáveis
+
+```bash
+cp .env.example .env
+python -c "import secrets; print(secrets.token_hex(32))"   # cole em SECRET_KEY
+```
+
+Diferente do `docker compose up`, o `docker stack deploy` **não** carrega o
+`.env` automaticamente — é preciso exportar as variáveis para o shell antes
+de publicar a stack:
+
+```bash
+set -a; source .env; set +a
+```
+
+(no PowerShell: `Get-Content .env | ForEach-Object { if ($_ -match '^\s*([^#=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1].Trim(), $Matches[2], 'Process') } }`)
+
+### 4. Publicar a stack
+
+```bash
+docker stack deploy -c docker-compose.yml lspa
+docker service ls
+docker stack ps lspa
+```
+
+A aplicação fica disponível em `http://<qualquer-IP-do-cluster>:5000`
+(roteamento de malha do Swarm). Para ver os logs de cada papel:
+
+```bash
+docker service logs -f lspa_manager
+docker service logs -f lspa_worker
+```
+
+### Teste rápido local (1 nó)
+
+Sem máquinas extras, é possível validar a imagem e o serviço `manager` num
+Swarm de nó único (`docker swarm init`, sem `join`). O serviço `worker` ficará
+com estado `Pending` nesse caso — está correto: a constraint `node.role ==
+worker` propositalmente não encontra onde agendar sem um nó Worker real.
+Para validar o processamento em si sem um segundo nó, rode o worker
+isoladamente, compartilhando o mesmo volume:
+
+```bash
+docker run --rm -v lspa_data:/app/database -e SECRET_KEY=$SECRET_KEY \
+    lspa-system:latest python -c "from worker import *; processar_ciclo(*montar_servicos())"
+```
+
+Essa validação foi executada durante o desenvolvimento: o ciclo consultou o
+IBGE, gravou as observações no volume e o `manager` passou a servi-las
+imediatamente em `/api/status`, confirmando a divisão coordenador/processamento.
+
+### Armazenamento compartilhado
+
+Os volumes nomeados `lspa_data`/`lspa_logs` usam o driver `local`, que **não
+é compartilhado entre hosts diferentes**. Em um cluster Swarm real com
+manager e workers em máquinas distintas, configure um volume com backend de
+rede (NFS, GlusterFS etc.) para que `manager` e `worker` leiam/escrevam o
+mesmo `lspa.db`, ou migre o acesso a dados para um banco cliente-servidor
+(MySQL/PostgreSQL) — o acesso ao banco já é isolado em
+`database.connection.Database` propositalmente para essa migração (ver
+seção "Migração futura para MySQL" abaixo).
+
+---
+
 ## Arquitetura (MVC)
 
 ```
@@ -156,6 +273,10 @@ app/
 └── exceptions.py    Exceções de domínio → códigos HTTP
 database/            Conexão e schema.sql
 tests/               Pytest (cliente, parser, services, repositório, controllers)
+run.py               Entrada do nó Manager (app Flask, via gunicorn no Docker)
+worker.py            Entrada do nó Worker (ciclo de ETL com o SIDRA/IBGE)
+Dockerfile           Imagem única (papel definido pelo comando do serviço)
+docker-compose.yml   Stack do Swarm: serviços manager/worker e constraints de nó
 ```
 
 Fluxo de uma consulta: `route → controller → service → (cache no repository | sidra_client → sidra_parser → repository) → controller → view/JSON`.

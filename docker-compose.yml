@@ -1,0 +1,95 @@
+# Stack do LSPA-System para Docker Swarm.
+#
+# Define explicitamente dois papéis no cluster, amarrados aos nós reais do
+# Swarm via `deploy.placement.constraints`:
+#
+#   manager  -> roda SOMENTE em nó(s) com role "manager" (node.role == manager)
+#               Coordenador: serve a aplicação Flask (páginas + API JSON/CSV),
+#               lendo os dados já processados/cacheados no banco.
+#   worker   -> roda SOMENTE em nó(s) com role "worker" (node.role == worker)
+#               Processamento: consulta a API SIDRA/IBGE, interpreta e grava
+#               os dados no banco compartilhado (ETL periódico).
+#
+# Deploy em um cluster Swarm real (manager + workers já unidos ao cluster):
+#   docker build -t lspa-system:latest .
+#   docker stack deploy -c docker-compose.yml lspa
+#   docker service ls
+#   docker node ls
+#
+# A rede é "overlay" (recurso do Swarm), então este arquivo exige modo Swarm
+# mesmo para um teste local de 1 nó (`docker swarm init`, sem `join`) — ver
+# a seção "Teste rápido local" no README. `docker compose up` simples (sem
+# Swarm) não funciona com este arquivo por causa da rede overlay.
+services:
+  manager:
+    image: lspa-system:latest
+    build: .
+    command: ["gunicorn", "app:create_app()", "--bind", "0.0.0.0:5000", "--workers", "2", "--access-logfile", "-"]
+    ports:
+      - "5000:5000"
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      SECRET_KEY: ${SECRET_KEY}
+      DATABASE_PATH: /app/database/lspa.db
+      SIDRA_TIMEOUT: ${SIDRA_TIMEOUT:-30}
+      SIDRA_TENTATIVAS: ${SIDRA_TENTATIVAS:-2}
+      CACHE_TTL_HORAS: ${CACHE_TTL_HORAS:-6}
+      METADADOS_TTL_HORAS: ${METADADOS_TTL_HORAS:-24}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: /app/logs/manager.log
+      DASHBOARD_PRODUTO_PADRAO: ${DASHBOARD_PRODUTO_PADRAO:-}
+    volumes:
+      - lspa_data:/app/database
+      - lspa_logs:/app/logs
+    networks:
+      - lspa_net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+
+  worker:
+    image: lspa-system:latest
+    build: .
+    command: ["python", "worker.py"]
+    healthcheck:
+      disable: true
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      SECRET_KEY: ${SECRET_KEY}
+      DATABASE_PATH: /app/database/lspa.db
+      SIDRA_TIMEOUT: ${SIDRA_TIMEOUT:-30}
+      SIDRA_TENTATIVAS: ${SIDRA_TENTATIVAS:-2}
+      CACHE_TTL_HORAS: ${CACHE_TTL_HORAS:-6}
+      METADADOS_TTL_HORAS: ${METADADOS_TTL_HORAS:-24}
+      WORKER_INTERVALO_SEGUNDOS: ${WORKER_INTERVALO_SEGUNDOS:-1800}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: /app/logs/worker.log
+      DASHBOARD_PRODUTO_PADRAO: ${DASHBOARD_PRODUTO_PADRAO:-}
+    volumes:
+      - lspa_data:/app/database
+      - lspa_logs:/app/logs
+    networks:
+      - lspa_net
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == worker
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+
+networks:
+  lspa_net:
+    driver: overlay
+
+volumes:
+  lspa_data:
+  lspa_logs:
