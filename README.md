@@ -436,6 +436,6 @@ indica as equivalências de tipos.
 - Gabriel Tobias 
 - João Batista
 - Gabriella Batista 
-- Elis Lívero
+- Elias Lívero
 - Jennifer Iwazaki
 
